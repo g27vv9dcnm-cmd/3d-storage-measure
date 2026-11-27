@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>センサー確認</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+/* Layout: one column for the phone — live camera with a crosshair on top, then the sensor readings and a result list. */
+:root {
+  --bg: #f3f5f4; --panel: #ffffff; --fg: #1b2420; --muted: #5d6b65; --line: #d5ddd9;
+  --accent: #1f7a5a; --ok: #1f7a5a; --ng: #b3412f; --wait: #8a6d1d;
+  --font: "Hiragino Sans", "Noto Sans JP", system-ui, sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #121715; --panel: #1b2220; --fg: #e4ebe7; --muted: #9aa8a1; --line: #2d3834;
+  --accent: #5cc79e; --ok: #5cc79e; --ng: #ef8a78; --wait: #e2c26a; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #121715; --panel: #1b2220; --fg: #e4ebe7; --muted: #9aa8a1; --line: #2d3834;
+  --accent: #5cc79e; --ok: #5cc79e; --ng: #ef8a78; --wait: #e2c26a; color-scheme: dark }
+body { background: var(--bg); color: var(--fg); font-family: var(--font); line-height: 1.6;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 16px 32px; }
+main { max-width: 560px; margin: 0 auto; display: grid; gap: 16px; }
+h1 { font-size: 1.3rem; margin: 0; text-wrap: balance; }
+p { margin: 0; }
+.lead { color: var(--muted); }
+button { font: inherit; font-weight: 600; border: 0; border-radius: 10px; padding: 12px 16px; background: var(--accent); color: var(--bg); cursor: pointer; }
+button.sub { background: transparent; color: var(--accent); border: 1px solid var(--accent); }
+button:focus-visible { outline: 3px solid var(--fg); outline-offset: 2px; }
+.row { display: flex; flex-wrap: wrap; gap: 8px; }
+.cam { position: relative; aspect-ratio: 3 / 4; max-width: 100%; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; display: grid; place-items: center; }
+.cam video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.cam .hint { color: var(--muted); padding: 16px; text-align: center; }
+.cross { position: absolute; inset: 0; pointer-events: none; }
+.cross::before, .cross::after { content: ""; position: absolute; left: 50%; top: 50%; background: #ff3b30; box-shadow: 0 0 0 1px #fff; }
+.cross::before { width: 44px; height: 2px; transform: translate(-50%, -50%); }
+.cross::after { width: 2px; height: 44px; transform: translate(-50%, -50%); }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px 16px; display: grid; gap: 8px; }
+.panel h2 { font-size: 1rem; margin: 0; }
+dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 16px; margin: 0; }
+dt { color: var(--muted); }
+dd { margin: 0; font-family: var(--mono); font-variant-numeric: tabular-nums; min-width: 0; overflow-wrap: anywhere; }
+ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; }
+li { display: grid; grid-template-columns: 4.5em 1fr; gap: 8px; }
+.tag { font-weight: 700; }
+.ok { color: var(--ok); } .ng { color: var(--ng); } .wait { color: var(--wait); }
+.small { font-size: 0.85rem; color: var(--muted); }
+</style>
+</head>
+<body>
+
+<main>
+  <h1>センサー確認（ミニARKit ステップ1）</h1>
+  <p class="lead">このページの中で、カメラとジャイロ（スマホの向きや傾きを測るセンサー）が使えるかを確かめます。iPhoneで開いて、下のボタンを押してください。許可を聞かれたら「許可」を選びます。</p>
+
+  <div class="row">
+    <button id="start" type="button">カメラとセンサーを試す</button>
+    <button id="copy" type="button" class="sub">結果をコピー</button>
+  </div>
+
+  <div class="cam" id="cam">
+    <p class="hint" id="camHint">ボタンを押すと、ここにカメラの映像が出ます。</p>
+    <video id="video" playsinline muted autoplay hidden></video>
+    <div class="cross" aria-hidden="true"></div>
+  </div>
+
+  <section class="panel">
+    <h2>結果</h2>
+    <ul id="results">
+      <li><span class="tag wait">まだ</span><span>カメラ</span></li>
+      <li><span class="tag wait">まだ</span><span>向きと傾き（ジャイロ）</span></li>
+    </ul>
+  </section>
+
+  <section class="panel">
+    <h2>センサーの数字</h2>
+    <dl>
+      <dt>向き（左右に回す）</dt><dd id="alpha">—</dd>
+      <dt>方位（北からの角度）</dt><dd id="heading">—</dd>
+      <dt>前後の傾き</dt><dd id="beta">—</dd>
+      <dt>左右の傾き</dt><dd id="gamma">—</dd>
+      <dt>届いた回数</dt><dd id="count">0</dd>
+    </dl>
+    <p class="small">スマホを縦にして、ゆっくり体ごと回すと「向き」が変わり、床に向けると「前後の傾き」が変わるはずです。</p>
+  </section>
+
+  <section class="panel">
+    <h2>くわしい情報</h2>
+    <dl>
+      <dt>枠の中</dt><dd id="framed">—</dd>
+      <dt>安全な接続</dt><dd id="secure">—</dd>
+      <dt>ページの許可</dt><dd id="perm">—</dd>
+      <dt>ブラウザ</dt><dd id="ua">—</dd>
+    </dl>
+  </section>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const log = { camera: 'まだ', motion: 'まだ', cameraNote: '', motionNote: '' };
+let count = 0;
+
+function fmt(v) { return typeof v === 'number' && Number.isFinite(v) ? v.toFixed(1) + '°' : '—'; }
+
+function renderResults() {
+  const ul = $('results');
+  ul.textContent = '';
+  const rows = [['カメラ', log.camera, log.cameraNote], ['向きと傾き（ジャイロ）', log.motion, log.motionNote]];
+  for (const [name, state, note] of rows) {
+    const li = document.createElement('li');
+    const tag = document.createElement('span');
+    tag.className = 'tag ' + (state === 'OK' ? 'ok' : state === 'まだ' || state === '待ち' ? 'wait' : 'ng');
+    tag.textContent = state;
+    const text = document.createElement('span');
+    text.textContent = note ? name + '：' + note : name;
+    li.append(tag, text);
+    ul.append(li);
+  }
+}
+
+function errText(e) { return (e && (e.name || '') + (e.message ? ' ' + e.message : '')) || String(e); }
+
+async function tryCamera() {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    log.camera = 'NG'; log.cameraNote = 'このページではカメラの機能がありません'; return;
+  }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
+    const v = $('video');
+    v.srcObject = stream; v.hidden = false; $('camHint').hidden = true;
+    try { await v.play(); } catch (e) { /* autoplay with muted usually works */ }
+    log.camera = 'OK'; log.cameraNote = '映像が出ています';
+  } catch (e) {
+    log.camera = 'NG'; log.cameraNote = '使えません（' + errText(e) + '）';
+  }
+}
+
+function onOrient(e) {
+  count++;
+  $('alpha').textContent = fmt(e.alpha);
+  $('beta').textContent = fmt(e.beta);
+  $('gamma').textContent = fmt(e.gamma);
+  $('heading').textContent = fmt(e.webkitCompassHeading);
+  $('count').textContent = String(count);
+  if (count === 1 || (log.motion !== 'OK' && e.alpha !== null)) {
+    if (e.alpha === null && e.beta === null) { log.motion = 'NG'; log.motionNote = '数字が空のまま届きます'; }
+    else { log.motion = 'OK'; log.motionNote = '数字が届いています'; }
+    renderResults();
+  }
+}
+
+async function tryMotion() {
+  if (typeof DeviceOrientationEvent === 'undefined') {
+    log.motion = 'NG'; log.motionNote = 'このブラウザにはありません'; return;
+  }
+  try {
+    if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+      const r = await DeviceOrientationEvent.requestPermission();
+      if (r !== 'granted') { log.motion = 'NG'; log.motionNote = '許可されませんでした（' + r + '）'; return; }
+    }
+    window.addEventListener('deviceorientation', onOrient);
+    log.motion = '待ち'; log.motionNote = '数字が届くのを待っています（スマホを少し動かしてください）';
+    setTimeout(() => {
+      if (count === 0) { log.motion = 'NG'; log.motionNote = '3秒待っても数字が届きません（ページの外から止められている見込み）'; renderResults(); }
+    }, 3000);
+  } catch (e) {
+    log.motion = 'NG'; log.motionNote = '使えません（' + errText(e) + '）';
+  }
+}
+
+$('start').addEventListener('click', async () => {
+  // iPhone asks for the motion permission only straight from a tap, so ask for it before anything is awaited.
+  const motion = tryMotion();
+  const camera = tryCamera();
+  await Promise.all([motion, camera]);
+  renderResults();
+});
+
+function resultText() {
+  return [
+    'センサー確認の結果',
+    'カメラ: ' + log.camera + ' ' + log.cameraNote,
+    'ジャイロ: ' + log.motion + ' ' + log.motionNote,
+    '届いた回数: ' + count + ' / 向き ' + $('alpha').textContent + ' / 前後 ' + $('beta').textContent,
+    '枠の中: ' + $('framed').textContent + ' / 安全な接続: ' + $('secure').textContent,
+    'ページの許可: ' + $('perm').textContent,
+    'ブラウザ: ' + navigator.userAgent,
+  ].join('\n');
+}
+
+$('copy').addEventListener('click', () => {
+  const text = resultText();
+  navigator.clipboard.writeText(text).then(
+    () => { $('copy').textContent = 'コピーしました'; },
+    () => { $('copy').textContent = 'コピーできませんでした。画面を写真に撮ってください'; }
+  );
+});
+
+let framed = '不明';
+try { framed = window.self !== window.top ? 'はい' : 'いいえ'; } catch (e) { framed = 'はい'; }
+$('framed').textContent = framed;
+$('secure').textContent = window.isSecureContext ? 'はい' : 'いいえ';
+$('ua').textContent = navigator.userAgent.replace(/^Mozilla\/5\.0 /, '');
+renderResults();
+
+(async () => {
+  try {
+    const p = window.claude && (await window.claude.use('permissions'));
+    if (!p) { $('perm').textContent = '読めません'; return; }
+    const map = await p.state();
+    const keys = Object.keys(map);
+    $('perm').textContent = keys.length ? keys.map((k) => k + '=' + map[k]).join(', ') : 'なし';
+  } catch (e) { $('perm').textContent = '読めません'; }
+})();
+</script>
+</body>
+</html>
