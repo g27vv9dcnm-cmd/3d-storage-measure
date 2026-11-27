@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>部屋の形を測る</title>
+<style>
+/* Layout: one column for the phone — camera with a crosshair, readout and buttons under it; then the plan. */
+:root {
+  --bg: #f3f5f4; --panel: #ffffff; --fg: #1b2420; --muted: #5d6b65; --line: #d5ddd9;
+  --accent: #1f7a5a; --fill: rgba(31, 122, 90, 0.12); --warn: #c0392b;
+  --font: "Hiragino Sans", "Noto Sans JP", system-ui, sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root {
+  --bg: #121715; --panel: #1b2220; --fg: #e4ebe7; --muted: #9aa8a1; --line: #2d3834;
+  --accent: #5cc79e; --fill: rgba(92, 199, 158, 0.16); --warn: #ef8a78; color-scheme: dark } }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.6 var(--font);
+  padding: max(12px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(24px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left)); }
+main { max-width: 560px; margin: 0 auto; }
+section { display: grid; gap: 12px; }
+[hidden] { display: none !important; }
+h1 { font-size: 1.25rem; margin: 0; }
+p { margin: 0; }
+.muted { color: var(--muted); }
+.small { font-size: 0.85rem; color: var(--muted); }
+label { display: grid; gap: 4px; font-weight: 600; }
+input[type=number], textarea { font: inherit; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); color: var(--fg); width: 100%; }
+textarea { font-family: var(--mono); font-size: 0.8rem; min-height: 5.5em; }
+button { font: inherit; font-weight: 600; border: 0; border-radius: 12px; padding: 12px 14px; background: var(--accent); color: var(--bg); cursor: pointer; touch-action: manipulation; }
+button.sub { background: transparent; color: var(--accent); border: 1px solid var(--accent); }
+button:disabled { opacity: 0.4; cursor: default; }
+button:focus-visible { outline: 3px solid var(--fg); outline-offset: 2px; }
+.row { display: flex; flex-wrap: wrap; gap: 8px; }
+.row > * { flex: 1 1 auto; }
+.big { font-size: 1.1rem; padding: 16px; }
+.cam { position: relative; aspect-ratio: 3 / 4; max-height: 52vh; width: 100%; background: #000; border-radius: 12px; overflow: hidden; }
+.cam video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.cross { position: absolute; inset: 0; pointer-events: none; }
+.cross::before, .cross::after { content: ""; position: absolute; left: 50%; top: 50%; background: #ff3b30; box-shadow: 0 0 0 1px #fff; }
+.cross::before { width: 56px; height: 2px; transform: translate(-50%, -50%); }
+.cross::after { width: 2px; height: 56px; transform: translate(-50%, -50%); }
+.readout { position: absolute; left: 8px; right: 8px; bottom: 8px; background: rgba(0,0,0,0.6); color: #fff; border-radius: 8px; padding: 6px 10px; font-variant-numeric: tabular-nums; }
+.count { position: absolute; top: 8px; right: 8px; background: rgba(0,0,0,0.6); color: #fff; border-radius: 8px; padding: 2px 10px; }
+.mini { width: 120px; height: 120px; position: absolute; top: 8px; left: 8px; background: rgba(255,255,255,0.85); border-radius: 8px; }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; display: grid; gap: 8px; }
+ol { margin: 0; padding-left: 1.3em; display: grid; gap: 4px; }
+#plan { width: 100%; aspect-ratio: 1; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; touch-action: manipulation; }
+.check { display: flex; gap: 8px; align-items: center; font-weight: 600; }
+</style>
+</head>
+<body>
+<main>
+  <section id="setup">
+    <h1>部屋の形を測る（ミニARKit 試作）</h1>
+    <p class="muted">部屋の真ん中に立ち、画面の十字を床の角に合わせてタップしていきます。スマホの向きと傾きから角の位置を計算します。データはこのスマホの中だけで使い、どこにも送りません。</p>
+    <div class="panel">
+      <label for="eyeIn">スマホを持つ高さ（床から画面まで, cm）
+        <input id="eyeIn" type="number" inputmode="decimal" value="120" min="30" max="250">
+      </label>
+      <p class="small">胸の前で持つと、だいたい 120〜140 cm です。一度だけ巻尺で測ると正確になります。</p>
+      <label for="ceilingIn">天井の高さ（分かれば, cm）
+        <input id="ceilingIn" type="number" inputmode="decimal" placeholder="空なら、あとで測れます" min="150" max="600">
+      </label>
+    </div>
+    <div class="panel">
+      <strong>やり方</strong>
+      <ol>
+        <li>部屋の真ん中に立ち、その場から動かずに体ごと回ります。</li>
+        <li>十字を床の角に合わせて「床の角」を押します。時計回りでも反時計回りでも、順番に1周します。</li>
+        <li>天井の高さを測るときは、床の角を押したあと、その真上の天井の角に十字を合わせて「天井の高さ」を押します。</li>
+        <li>床の角が家具で隠れていたら、天井の高さを測ったあとで、真上の天井の角を「天井の角」で押します。</li>
+        <li>全部押したら「できた」。</li>
+      </ol>
+    </div>
+    <button id="start" type="button" class="big">はじめる（カメラとセンサーを使う）</button>
+    <p class="small"><a href="check.html">センサー確認のページ</a></p>
+  </section>
+
+  <section id="measure" hidden>
+    <div class="cam">
+      <video id="video" playsinline muted autoplay hidden></video>
+      <div class="cross" aria-hidden="true"></div>
+      <canvas id="mini" class="mini" width="240" height="240" aria-label="ここまでの角"></canvas>
+      <span class="count" id="count">角 0 / 12</span>
+      <div class="readout" id="readout">センサーを待っています</div>
+    </div>
+    <p class="small" id="sensorNote" hidden></p>
+    <button id="addFloor" type="button" class="big" disabled>床の角</button>
+    <div class="row">
+      <button id="measureCeil" type="button" class="sub" disabled>天井の高さ</button>
+      <button id="addCeil" type="button" class="sub" disabled>天井の角</button>
+    </div>
+    <p class="small" id="ceilNote">天井の高さはまだです。</p>
+    <div class="row">
+      <button id="undo" type="button" class="sub" disabled>1つ戻す</button>
+      <button id="finish" type="button" disabled>できた</button>
+    </div>
+  </section>
+
+  <section id="result" hidden>
+    <h1>測った部屋の形</h1>
+    <canvas id="plan" aria-label="部屋の平面図"></canvas>
+    <label class="check"><input id="tidyIn" type="checkbox" checked> 形をそろえる（点線が測ったままの形）</label>
+    <p class="small" id="tidyNote"></p>
+    <p class="small">そろえたくない壁は、図の壁をタップすると測ったままの向きに戻ります。長さは目安です。正しい長さはアプリで辺を選んで入れてください。</p>
+    <label for="heightOut">天井の高さ（cm）
+      <input id="heightOut" type="number" inputmode="decimal" placeholder="未入力">
+    </label>
+    <button id="copy" type="button" class="big">結果をコピー</button>
+    <textarea id="json" readonly aria-label="結果の文字"></textarea>
+    <div class="row">
+      <button id="back" type="button" class="sub">角を足す・直す</button>
+      <button id="restart" type="button" class="sub">最初から測る</button>
+    </div>
+  </section>
+</main>
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
